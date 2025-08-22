@@ -4,6 +4,7 @@ using System;
 using System.ClientModel;
 using System.Collections;
 using System.Diagnostics;
+using System.Net;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
@@ -17,6 +18,27 @@ namespace AIDiscuss
         public static List<ChatMessage> ChatMessagesB { get; set; } = [];
 
         private static void Main(string[] args)
+        {
+            ToolCallTest();
+        }
+
+        private static void ToolCallTest()
+        {
+            string endPoint = "https://api.deepseek.com";
+            string apiToken = "";
+            string model = "deepseek-reasoner";
+            ChatMessagesA.Add(new AssistantChatMessage("本次测试目的是ToolCall测试。请根据用户输入调用不同的ToolCall"));
+            Console.Write(">> ");
+            while (true)
+            {
+                ChatMessagesA.Add(new UserChatMessage(Console.ReadLine()));
+                (bool finish, string reasoningResult, string result, int token) = Chat("", endPoint, apiToken, model, ChatMessagesA);
+                ChatMessagesA.Add(new AssistantChatMessage(result));
+                Console.Write("\nFinished.\n>> ");
+            }
+        }
+
+        private static void Discuss()
         {
             string endPoint1 = "https://api.deepseek.com";
             string endPoint2 = "https://dashscope.aliyuncs.com/compatible-mode/v1";
@@ -129,6 +151,7 @@ namespace AIDiscuss
                 Temperature = 1f,
             };
             option.Tools.Add(ChatTool.CreateFunctionTool("Finish", "此函数表示你被对方的观点说服，当你被对方论点驳倒无法回复时调用此函数来结束本局辩论"));
+            option.Tools.Add(ChatTool.CreateFunctionTool("ToolCallTest", "ToolCall调用测试，请根据Prompt调用"));
             bool requiresAction;
             string msg = "";
             string reasoningResult = "";
@@ -141,8 +164,11 @@ namespace AIDiscuss
                     requiresAction = false;
                     List<ChatToolCall> toolCall = [];
                     ChatFinishReason finishReason = ChatFinishReason.Stop;
+                    ToolCallStreamBuilder builder = new();
                     foreach (StreamingChatCompletionUpdate chatUpdate in client.CompleteChatStreaming(chatMessages, option))
                     {
+                        builder.Append(chatUpdate.ToolCallUpdates);
+
                         var delta = AppendContentToMessage(chatUpdate.ContentUpdate);
                         if (!string.IsNullOrEmpty(delta))
                         {
@@ -177,12 +203,18 @@ namespace AIDiscuss
 
                         case ChatFinishReason.ToolCalls:
                             Console.WriteLine("尝试 ToolCall");
+                            toolCall = builder.Build();
                             foreach (var tool in toolCall)
                             {
                                 switch (tool.FunctionName)
                                 {
                                     case "Finish":
                                         return (true, reasoningResult, "我甘拜下风。", tokenConsume);
+
+                                    case "ToolCallTest":
+                                        chatMessages.Add(new AssistantChatMessage(toolCall));
+                                        chatMessages.Add(new ToolChatMessage(tool.Id, "ToolCallTest 调用成功"));
+                                        break;
                                 }
                             }
                             requiresAction = true;
